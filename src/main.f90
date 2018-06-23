@@ -11,6 +11,7 @@ module basic
   type field
     integer(4)          :: nx,ny,nq
     real(8)             :: Lx,Ly
+    real(8)             :: Uwall
     real(8)             :: dx,dy
     real(8),allocatable :: x(:)
     real(8),allocatable :: y(:)
@@ -25,7 +26,7 @@ module basic
   type solver
     integer :: ntime
     real(8) :: usetime
-    real(8) :: Re,nu,tau
+    real(8) :: Re,nu,tau,dt
   endtype solver
 contains
   function nfield(nx,ny,nq,Lx,Ly)
@@ -41,7 +42,7 @@ contains
     nfield%Ly = Ly
     nfield%dx = Lx / dble(nx-1)
     nfield%dy = Ly / dble(ny-1)
-    write(IUT6,'(a18, 3i5)') "allocate nx ny nq:",nfield%nx, nfield%ny, nfield%nq
+   write(IUT6,'(a18, 3i5, f10.6)') "allocate nx ny nq:",nfield%nx, nfield%ny, nfield%nq, nfield%Uwall
     allocate(nfield%x(nx))
     allocate(nfield%y(ny))
     allocate(nfield%rho(nx,ny))
@@ -78,8 +79,9 @@ contains
     d2q9%w(1)   = 4.d0/9.d0
     d2q9%w(2:5) = 1.d0/9.d0
     d2q9%w(6:9) = 1.d0/36.d0
-    d2q9%e(1,:) = (/0.0d0,1.0d0,0.0d0,-1.0d0,0.0d0,1.0d0,-1.0d0,-1.0d0,1.0d0/)
-    d2q9%e(2,:) = (/0.0d0,0.0d0,1.0d0,0.0d0,-1.0d0,1.0d0,1.0d0,-1.0d0,-1.0d0/)
+    d2q9%e(1,:) = (/0.0d0, 1.0d0, 0.0d0, -1.0d0, 0.0d0, 1.0d0, -1.0d0, -1.0d0, 1.0d0/)
+    d2q9%e(2,:) = (/0.0d0, 0.0d0, 1.0d0, 0.0d0, -1.0d0, 1.0d0, 1.0d0,  -1.0d0,-1.0d0/)
+    !opposite of 1,2,3,4,5,6,7,8,9
     d2q9%lbb = (/1,4,5,2,3,8,9,6,7/)
     write(IUT6,'(a19)') "set D2Q9 model Done"
   endfunction d2q9
@@ -97,7 +99,7 @@ contains
       uu = v%u(i,j)*v%u(i,j) + v%v(i,j)*v%v(i,j)
       do l =1, v%nq
       eu = model%e(l,1) * v%u(i,j) + model%e(l,2) * v%v(i,j)
-      s  = model%w(l) * (1.0d0 + 3.0d0 * eu + 4.5d0 * eu**2 -1.5d0 * uu)
+      s  = model%w(l) * (1.0d0 + 3.0d0 * eu + 4.5d0 * eu*eu -1.5d0 * uu)
       v%feq(i,j,l) = v%rho(i,j) * s
       enddo
     enddo
@@ -110,21 +112,100 @@ contains
     type(lbmmodel) :: model
     integer        :: i,j,l
 
-    v%f(:,:,1) = v%f(:,:,1)
+    ! 2 Right
     do j =1, v%ny
-    do i =1, v%nx
-    do l =2, v%nq
-      if( (i+int(model%e(l,1)))<1    .or. &
-          (i+int(model%e(l,1)))>v%nx .or. &
-          (j+int(model%e(l,2)))<1    .or. &
-          (j+int(model%e(l,2)))>v%ny )then
-          !write(*,*) i,j
-      else
-        v%f(i+int(model%e(l,1)), j+int(model%e(l,2)),l) = v%f(i,j,l)
-      endif
+      do i =v%nx, 2, -1
+        v%f(i,j,2)   = v%f(i-1,j,2)
+      enddo
+      ! 4 Left
+      do i =1, v%nx-1
+        v%f(i,j,4)   = v%f(i+1,j,4)
+      enddo
     enddo
+
+    ! 3 Up
+    do j =v%ny, 2, -1
+      do i =1, v%nx
+        v%f(i,j,3)   = v%f(i,j-1,3)
+      enddo
+      ! 6 UpRight
+      do i =v%nx,2, -1
+        v%f(i,j,6) = v%f(i-1,j-1,6)
+      enddo
+      do i =1,v%nx-1
+        v%f(i,j,7) = v%f(i+1,j-1,7)
+      enddo
     enddo
+
+    ! 5 Down
+    do j =1, v%ny-1
+      do i =1, v%nx
+        v%f(i,j,5)   = v%f(i,j+1,5)
+      enddo
+      ! 8 DowmnLeft
+      do i =1, v%nx-1
+        v%f(i,j,8) = v%f(i+1,j+1,8)
+      enddo
+      ! 9 DownRight
+      do i =v%nx, 2, -1
+        v%f(i,j,9) = v%f(i-1,j+1,9)
+      enddo
     enddo
+
+    !! 6 UpRight
+    !do j =v%ny,2, -1
+    !do i =v%nx,2, -1
+    !  v%f(i,j,6) = v%f(i-1,j-1,6)
+    !enddo
+    !enddo
+    !! 7 UpLeft
+    !do j =v%ny, 2, -1
+    !do i =1,v%nx-1
+    !  v%f(i,j,7) = v%f(i+1,j-1,7)
+    !enddo
+    !enddo
+
+    !! 8 DowmnLeft
+    !do j =1, v%ny-1
+    !do i =1, v%nx-1
+    !  v%f(i,j,8) = v%f(i+1,j+1,8)
+    !enddo
+    !enddo
+    !! 9 DownRight
+    !do j =1, v%ny-1
+    !do i =v%nx, 2, -1
+    !  v%f(i,j,9) = v%f(i-1,j+1,9)
+    !enddo
+    !enddo
+
+    !do j =1, v%ny
+    !do i =1, v%nx
+    !do l =2, v%nq
+    !  if( (i+int(model%e(l,1)))<1    .or. &
+    !      (i+int(model%e(l,1)))>v%nx .or. &
+    !      (j+int(model%e(l,2)))<1    .or. &
+    !      (j+int(model%e(l,2)))>v%ny )then
+    !      !write(*,*) i,j
+    !  else
+    !    v%f(i+int(model%e(l,1)), j+int(model%e(l,2)),l) = v%f(i,j,l)
+    !  endif
+    !enddo
+    !enddo
+    !enddo
+    ! Lef
+    !do j =1, v%ny
+    !do i =1, v%nx
+    !      (i+int(model%e(l,1)))>v%nx .or. &
+    !      (j+int(model%e(l,2)))<1    .or. &
+    !      (j+int(model%e(l,2)))>v%ny )then
+    !      !write(*,*) i,j
+    !  else
+    !    v%f(i+int(model%e(l,1)), j+int(model%e(l,2)),l) = v%f(i,j,l)
+    !  endif
+    !enddo
+    !enddo
+    !enddo
+
   endsubroutine streaming
 
   subroutine calc_macroscopic(v,model)
@@ -162,6 +243,11 @@ contains
       v%v(i,j) = tmp2 / v%rho(i,j)
     enddo
     enddo
+    do i =2, v%nx-1
+      v%u(i,v%ny) = v%Uwall
+      v%v(i,v%ny) = 0.0d0
+    enddo
+ 
     endsubroutine calc_macroscopic
 
     subroutine set_boundary(v,model)
@@ -191,8 +277,6 @@ contains
       v%f(i,1,model%lbb(5)) = v%f(i,1,5)
       v%f(i,1,model%lbb(8)) = v%f(i,1,8)
       v%f(i,1,model%lbb(9)) = v%f(i,1,9)
-      v%u(i,1) = 0.d0
-      v%v(i,1) = 0.d0
       !v%f(i,1,5) = 0.0d0 
       !v%f(i,1,8) = 0.0d0
       !v%f(i,1,9) = 0.0d0
@@ -202,8 +286,6 @@ contains
       v%f(1,j,model%lbb(4)) = v%f(1,j,4)
       v%f(1,j,model%lbb(7)) = v%f(1,j,7)
       v%f(1,j,model%lbb(8)) = v%f(1,j,8)
-      v%u(1,j) = 0.d0
-      v%v(1,j) = 0.d0
       !v%f(1,j,4) = 0.0d0 
       !v%f(1,j,7) = 0.0d0
       !v%f(1,j,8) = 0.0d0
@@ -211,8 +293,6 @@ contains
       v%f(nx,j,model%lbb(2)) = v%f(nx,j,2)
       v%f(nx,j,model%lbb(6)) = v%f(nx,j,6)
       v%f(nx,j,model%lbb(9)) = v%f(nx,j,9)
-      v%u(nx,j) = 0.d0
-      v%v(nx,j) = 0.d0
       !v%f(nx,j,2) = 0.0d0 
       !v%f(nx,j,6) = 0.0d0
       !v%f(nx,j,9) = 0.0d0
@@ -220,21 +300,23 @@ contains
  
     do i =2, nx-1
     ! North
-    v%u(i,ny) = 1.d0
-    v%v(i,ny) = 0.d0
-    !v%rho(i,ny) = (1.d0 / 1.d0 + v%v(i,ny)) * (v%f(i,ny,1) + v%f(i,ny,2) + v%f(i,ny,4)) &
-    !                                 + 2.d0 * (v%f(i,ny,3) + v%f(i,ny,6) + v%f(i,ny,7))
+    v%rho(i,ny) = (1.d0 / 1.d0 + v%v(i,ny)) * (v%f(i,ny,1) + v%f(i,ny,2) + v%f(i,ny,4)) &
+                                     + 2.d0 * (v%f(i,ny,3) + v%f(i,ny,6) + v%f(i,ny,7))
  
     v%f(i,ny,model%lbb(3)) = v%f(i,ny,3)
     v%f(i,ny,model%lbb(6)) = v%f(i,ny,6) &
-                           - v%rho(i, ny) * v%u(i,ny) / 0.6d0
+                           +(v%f(i, ny,2) - v%f(i,ny,4))/ 2.0d0 &
+                           - v%rho(i, ny) * v%u(i,ny)   / 2.0d0 &
+                           - v%rho(i, ny) * v%v(i,ny)   / 6.0d0
     v%f(i,ny,model%lbb(7)) = v%f(i,ny,7) &
-                           + v%rho(i, ny) * v%u(i,ny) / 0.6d0
+                           +(v%f(i, ny,4) - v%f(i,ny,2))/ 2.0d0 &
+                           + v%rho(i, ny) * v%u(i,ny)   / 2.0d0 &
+                           - v%rho(i, ny) * v%v(i,ny)   / 6.0d0
     !v%f(i,ny,3) = 0.0d0 
     !v%f(i,ny,6) = 0.0d0
     !v%f(i,ny,7) = 0.0d0
     enddo
-    endsubroutine
+    endsubroutine set_boundary
 
  
 end module basic
@@ -250,21 +332,37 @@ program main
   real(8)       :: tmp1
   real(8)       :: tmp2
 
-v = nfield(121, 121, 9, 1.0d0, 1.0d0)
+v = nfield(128, 128, 9, 128.0d0, 128.0d0)
 model = d2q9(2, 9)
-sol%ntime = 1000
-sol%Re = 100.0d0
-sol%nu = 0.064d0
-sol%tau= 0.69d0
+! Setting
+sol%Re  = 100.0d0
+v%Uwall = 0.05d0
+sol%dt = (v%dx)* v%Uwall
+sol%nu = v%Uwall * v%Lx / sol%Re
+sol%tau= 0.50d0 + 3d0 * sol%nu
 
+write(IUT6, '(a10, f12.6)') "Re",    sol%Re
+write(IUT6, '(a10, f12.6)') "dt",    sol%dt
+write(IUT6, '(a10, f12.6)') "Uwall", v%Uwall
+write(IUT6, '(a10, f12.6)') "nu",    sol%nu
+write(IUT6, '(a10, f12.6)') "tau",   sol%tau
+
+sol%ntime = 400
 do l = 1, v%nq
   v%f(:,:,l) = model%w(l)
 enddo
 v%rho(:,:)  = 1.d0
-v%u(2:v%nx-1,v%ny) = 1.d0
+do i = 2,v%nx-1
+  v%u(i, v%ny)  = v%Uwall
+  v%rho(i,v%ny) = (1.d0 / 1.d0 + v%v(i,v%ny)) &
+                * (v%f(i,v%ny,1) + v%f(i,v%ny,2) + v%f(i,v%ny,4)) &
+                + 2.d0 * (v%f(i,v%ny,3) + v%f(i,v%ny,6) + v%f(i,v%ny,7))
+enddo
+call set_boundary(v,model)
+
 
 do t = 1, sol%ntime
-  if(mod(t,100).eq.0)then
+  if(mod(t,10).eq.0)then
     tmp1 = 0.0d0
     tmp2 = 99999.d0
     do j =1, v%ny
@@ -285,11 +383,11 @@ do t = 1, sol%ntime
   enddo
   enddo
   enddo
- ! Streaming
+  ! Streaming
   call streaming(v,model)
   ! BB & Boundary
   call set_boundary(v,model)
- ! macroscopic
+  ! macroscopic
   call calc_macroscopic(v, model)
 
 enddo
