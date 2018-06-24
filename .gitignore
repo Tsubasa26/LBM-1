@@ -1,0 +1,6 @@
+*vtk
+*.o
+*.mod
+*.txt
+*.dat
+lbm

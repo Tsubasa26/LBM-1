@@ -301,7 +301,7 @@ contains
     !do l=2, v%nq
     !  ! v ob      : object
     !  ! model lbb : list BB
-    !  if(v%ob(i+int(model%e(l,0)), j+int(model%e(l,1))) * v%ob(i,j) .eq. 0)then
+    !  if((v%ob(i+int(model%e(l,0)), j+int(model%e(l,1))).eq.1).and. (v%ob(i,j) .eq. 0))then
     !    v%f(i,j,model%lbb(l)) = v%f(i,j,l)
     !  endif
     !enddo
