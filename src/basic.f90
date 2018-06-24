@@ -21,13 +21,14 @@ module basic
     real(8),allocatable :: v(:,:)
     real(8),allocatable :: f(:,:,:)
     real(8),allocatable :: feq(:,:,:)
+    real(8),allocatable :: fs(:,:,:)
     integer(8),allocatable :: ob(:,:)
   endtype field
 
   type solver
     integer :: ntime
     real(8) :: usetime
-    real(8) :: Re,nu,tau,dt
+    real(8) :: Re,nu,tau,dt,c
   endtype solver
 contains
   function nfield(nx,ny,nq,Lx,Ly)
@@ -52,6 +53,7 @@ contains
     ! LBM
     allocate(nfield%f(nx,ny,nq))
     allocate(nfield%feq(nx,ny,nq))
+    allocate(nfield%fs(nx,ny,nq))
     allocate(nfield%ob(nx,ny))
     ! Set Field
     do i = 1, nfield%nx
@@ -97,7 +99,7 @@ contains
     do i =1, v%nx
       uu = v%u(i,j)*v%u(i,j) + v%v(i,j)*v%v(i,j)
       do l =1, v%nq
-        eu = model%e(l,1) * v%u(i,j) + model%e(l,2) * v%v(i,j)
+        eu = model%e(1,l) * v%u(i,j) + model%e(2,l) * v%v(i,j)
         v%feq(i,j,l) = model%w(l) * v%rho(i,j) * (1.0d0 + 3.0d0 * eu + 4.5d0 * eu*eu -1.5d0 * uu)
       enddo
     enddo
@@ -141,6 +143,7 @@ contains
     type(lbmmodel) :: model
     integer        :: i,j,l
 
+    v%f(i,j,1) = v%f(i,j,1)
     ! 2 Right
     do j =1, v%ny
       do i =v%nx, 2, -1
@@ -180,7 +183,6 @@ contains
         v%f(i,j,9) = v%f(i-1,j+1,9)
       enddo
     enddo
-
     !! 6 UpRight
     !do j =v%ny,2, -1
     !do i =v%nx,2, -1
@@ -207,35 +209,30 @@ contains
     !enddo
     !enddo
 
-    !do j =1, v%ny
-    !do i =1, v%nx
-    !do l =2, v%nq
-    !  if( (i+int(model%e(l,1)))<1    .or. &
-    !      (i+int(model%e(l,1)))>v%nx .or. &
-    !      (j+int(model%e(l,2)))<1    .or. &
-    !      (j+int(model%e(l,2)))>v%ny )then
-    !      !write(*,*) i,j
-    !  else
-    !    v%f(i+int(model%e(l,1)), j+int(model%e(l,2)),l) = v%f(i,j,l)
-    !  endif
-    !enddo
-    !enddo
-    !enddo
-    ! Lef
-    !do j =1, v%ny
-    !do i =1, v%nx
-    !      (i+int(model%e(l,1)))>v%nx .or. &
-    !      (j+int(model%e(l,2)))<1    .or. &
-    !      (j+int(model%e(l,2)))>v%ny )then
-    !      !write(*,*) i,j
-    !  else
-    !    v%f(i+int(model%e(l,1)), j+int(model%e(l,2)),l) = v%f(i,j,l)
-    !  endif
-    !enddo
-    !enddo
-    !enddo
 
   endsubroutine streaming
+
+  subroutine streaming2(v, model)
+    implicit none
+    type(field)    :: v
+    type(lbmmodel) :: model
+    integer        :: i,j,l
+
+    do j =1, v%ny
+    do i =1, v%nx
+    do l =1, v%nq
+      if((i + nint(model%e(1,l)) ) < 1    .or. &
+         (i + nint(model%e(1,l)) ) > v%nx .or. &
+         (j + nint(model%e(2,l)) ) < 1    .or. &
+         (j + nint(model%e(2,l)) ) > v%ny )then
+          !v%fs(i, j, l) = v%f(i,j,l)
+      else
+        v%fs(i+int(model%e(1,l)), j+int(model%e(2,l)), l) = v%f(i,j,l)
+      endif
+    enddo
+    enddo
+    enddo
+  endsubroutine streaming2
 
   subroutine calc_macroscopic(v,model)
     implicit none
@@ -254,7 +251,7 @@ contains
     enddo
     enddo
     ! Zou-He
-    do i =1, v%nx
+    do i =2, v%nx-1
       v%rho(i,v%ny) = (1.d0 / 1.d0 + v%Vwall) &
                            * (v%f(i,v%ny,1) + v%f(i,v%ny,2) + v%f(i,v%ny,4)) &
                     + 2.d0 * (v%f(i,v%ny,3) + v%f(i,v%ny,6) + v%f(i,v%ny,7))
@@ -276,14 +273,14 @@ contains
     v%u(:,1) = 0.0d0
     v%v(:,1) = 0.0d0
     ! East
-    v%u(v%nx,:) = 0.0d0
-    v%v(v%nx,:) = 0.0d0
+    v%u(v%nx,1:v%ny-1) = 0.0d0
+    v%v(v%nx,1:v%ny-1) = 0.0d0
     ! West
-    v%u(1,:) = 0.0d0
-    v%v(1,:) = 0.0d0
+    v%u(1,1:v%ny-1) = 0.0d0
+    v%v(1,1:v%ny-1) = 0.0d0
     ! Top
     ! miki
-    do i =1, v%nx
+    do i =2, v%nx-1
       v%u(i,v%ny) = v%Uwall
       v%v(i,v%ny) = v%Vwall
     enddo
@@ -330,7 +327,7 @@ contains
     enddo
  
     ! North
-    do i =1, nx
+    do i =2, nx-1
       ! BB
       !v%f(i,ny,model%lbb(3)) = v%f(i,ny,3)
       !v%f(i,ny,model%lbb(6)) = v%f(i,ny,6)
@@ -338,8 +335,9 @@ contains
       ! Zou-He
       v%rho(i,ny) = (1.d0 / 1.d0 + v%Vwall) * (v%f(i,ny,1) + v%f(i,ny,2) + v%f(i,ny,4)) &
                                      + 2.d0 * (v%f(i,ny,3) + v%f(i,ny,6) + v%f(i,ny,7))
+      !miki
       v%f(i,ny,model%lbb(3)) = v%f(i,ny,3) - 2.0d0 * v%Vwall / 3.0d0
-      v%f(i,ny,model%lbb(6)) = v%f(i,ny,6)  - v%Vwall / 3.0d0 &
+      v%f(i,ny,model%lbb(6)) = v%f(i,ny,6)  + v%Vwall / 3.0d0 &
                              +(v%f(i, ny,2) - v%f(i,ny,4))/ 2.0d0 &
                              - v%rho(i, ny) * v%Uwall / 2.0d0 &
                              - v%rho(i, ny) * v%Vwall / 2.0d0

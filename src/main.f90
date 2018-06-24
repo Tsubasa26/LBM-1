@@ -9,16 +9,19 @@ program main
   real(8)       :: tmp1
   real(8)       :: tmp2
 
-v = nfield(32,32, 9, 32.0d0, 32.0d0)
+!v = nfield(32,32, 9, 1.0d0, 1.0d0)
+v = nfield(128,128, 9, 1.0d0, 1.0d0)
 model = d2q9(2, 9)
 ! Setting
-sol%Re  = 10.0d0
-v%Uwall = 0.1d0
-!v%Uwall = 0.0d0
+sol%Re  = 1000.0d0
+v%Uwall = 0.5d0
 v%Vwall = 0.0d0
-sol%dt = (v%dx)* v%Uwall
+sol%c  = 1.0d0
+!sol%dt = v%dx / sol%c
+sol%dt = v%Uwall * v%dx / sol%c
 sol%nu = v%Uwall * v%Lx / sol%Re
-sol%tau= 0.50d0 + 3d0 * sol%nu
+sol%tau= 0.50d0 + 3.0d0 * sol%nu / (sol%dt * (sol%c**2))
+!sol%tau= 0.50d0 + 3.0d0 * sol%nu
 
 write(IUT6, '(a10, f12.6)') "Re",    sol%Re
 write(IUT6, '(a10, f12.6)') "dt",    sol%dt
@@ -26,16 +29,20 @@ write(IUT6, '(a10, f12.6)') "Uwall", v%Uwall
 write(IUT6, '(a10, f12.6)') "nu",    sol%nu
 write(IUT6, '(a10, f12.6)') "tau",   sol%tau
 
+!if(sol%tau > 0.8d0)then
+!  write(IUT6, '(a17, f12.6)') "tau is too big :",   sol%tau
+!  stop
+!endif
 sol%ntime = 1000
 do l = 1, v%nq
   v%f(:,:,l) = model%w(l)
 enddo
 v%rho(:,:)  = 1.d0
 ! miki
-do i = 1,v%nx
+do i = 2,v%nx-1
   v%u(i, v%ny)  = v%Uwall
   v%rho(i,v%ny) = (1.d0 / 1.d0 + v%Vwall) &
-                * (v%f(i,v%ny,1) + v%f(i,v%ny,2) + v%f(i,v%ny,4)) &
+                       * (v%f(i,v%ny,1) + v%f(i,v%ny,2) + v%f(i,v%ny,4)) &
                 + 2.d0 * (v%f(i,v%ny,3) + v%f(i,v%ny,6) + v%f(i,v%ny,7))
 enddo
 
@@ -51,6 +58,7 @@ do t = 1, sol%ntime
     enddo
     write(IUT6, '(a10, i6)') "Iteration", t
     write(IUT6, *) tmp1,tmp2
+    call write_vtk2d(v%nx,v%ny,t,v%x,v%y,v%u,v%v,v%rho/3.0d0)
   endif
   ! Collision
   v%feq = 0.0d0
@@ -63,7 +71,9 @@ do t = 1, sol%ntime
   enddo
   enddo
   ! Streaming
-  call streaming(v,model)
+  !call streaming(v,model)
+  call streaming2(v,model)
+  v%f = v%fs
   !call transition(v,model)
   ! BB & Boundary
   call set_boundary(v,model)
@@ -71,7 +81,8 @@ do t = 1, sol%ntime
   call calc_macroscopic(v, model)
 
 enddo
-
+write(*,*) model%e(1,1)
+write(*,*) model%e(2,1)
 ! for gnuplot data
 filename="u.dat"
 call push_gnuplot(v, v%u, filename)
